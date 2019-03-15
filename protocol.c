@@ -16,14 +16,18 @@ MODULE_DESCRIPTION("Peek and poke module");
 
 static char sysfs_buffer[sysfs_max_data_size + 1] = "\0";
 static ssize_t used_buffer_size = 0;
-static char input_address[9];
-static char input_number[3];
-static char input_operation;
+//static char input_address[9];
+//static char input_number[3];
+//static char input_operation;
 static int index_read;
 static int index_write = 0;
 static uint32_t* register_ptr;
 static char register_value_string[register_size*2 + 1] = "\0";
 static uint32_t address_in_hex;
+
+static char input_operation;
+static uint32_t input_address;
+static uint32_t input_number;
 
 #define RTC_UCOUNT  0x40024000
 #define RTC_CTRL    0x40024010
@@ -55,6 +59,7 @@ static ssize_t  sysfs_show(struct device *dev,
     return sprintf(buffer, "%s", sysfs_buffer);
 }
 
+/*
 static void parse_input(const char* buffer)
 {
     index_write = 0;
@@ -77,6 +82,7 @@ static void parse_input(const char* buffer)
     }
     input_number[index_write-1] = '\0';
 }
+*/
 
 static ssize_t sysfs_store(struct device* dev,
     struct device_attribute* attr, const char* buffer,
@@ -84,25 +90,25 @@ static ssize_t sysfs_store(struct device* dev,
 {
     used_buffer_size = count > sysfs_max_data_size ? sysfs_max_data_size : count;
 
-    parse_input(buffer);
+    //parse_input(buffer);
+    sscanf(buffer, "%c %x %x", &input_operation, &input_address, &input_number);
+    //address_in_hex = hex2int(input_address);
+    register_ptr = io_p2v(input_address);
 
     if(input_operation == 'r')
     {
-        printk(KERN_INFO "Performing read operation on address: %s\n", input_address);
-        printk(KERN_INFO "Address: %s Number: %s called\n", input_address, input_number);
+        printk(KERN_INFO "Reading %x bytes from address: %x\n",
+            input_number, input_address);
 
-        address_in_hex = hex2int(input_address);
-        register_ptr = io_p2v(address_in_hex);
-        printk(KERN_INFO "*register_ptr: %x", *register_ptr);
         sprintf(register_value_string, "%x", *register_ptr);
-        printk(KERN_INFO "register_value_string: %s", register_value_string);
-        printk(KERN_INFO "register_value_string size: %u", sizeof(register_value_string));
 
-        memcpy(sysfs_buffer, register_value_string, register_size);
-        sysfs_buffer[9] = '\0';
+        memcpy(sysfs_buffer, register_value_string, register_size*2);
+        sysfs_buffer[register_size*2 + 1] = '\0';
     }
     else if(input_operation == 'w')
     {
+        printk(KERN_INFO "Writing %x to address (%x)\n", input_number, input_address);
+        *register_ptr = input_number;
     }
     else
     {
