@@ -5,7 +5,7 @@
 #include <mach/hardware.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_AUTHOR("Josh");
+MODULE_AUTHOR("es6group");
 MODULE_DESCRIPTION("Peek and poke module");
 
 #define sysfs_dir "es6"
@@ -13,11 +13,16 @@ MODULE_DESCRIPTION("Peek and poke module");
 #define sysfs_max_data_size 1024
 #define register_size 4
 
+/* sysfs */
 static char sysfs_buffer[sysfs_max_data_size + 1] = "\0";
 static ssize_t used_buffer_size = 0;
+
+/* vars set by parsing input */
 static char input_operation;
 static uint32_t input_address;
 static uint32_t input_number;
+
+/* register */
 static uint32_t* register_ptr;
 static char register_value_string[register_size*2 + 1] = "\0";
 
