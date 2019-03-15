@@ -2,56 +2,31 @@
 #include <linux/kernel.h>
 #include <linux/kobject.h>
 #include <linux/module.h>
+#include <mach/hardware.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Josh");
 MODULE_DESCRIPTION("Peek and poke module");
 
-/*
- * Start of virtual addresses for IO devices
- */
-#define IO_BASE     0xF0000000
-
-/*
- * This macro relies on fact that for all HW i/o addresses bits 20-23 are 0
- */
-#define IO_ADDRESS(x)   (((((x) & 0xff000000) >> 4) | ((x) & 0xfffff)) |\
-             IO_BASE)
-
-#define io_p2v(x)   ((void __iomem *) (unsigned long) IO_ADDRESS(x))
-#define io_v2p(x)   ((((x) & 0x0ff00000) << 4) | ((x) & 0x000fffff))
 
 #define sysfs_dir "es6"
 #define sysfs_file "peek_and_poke"
 #define sysfs_max_data_size 1024
+#define register_size 4
 
-//static char sysfs_buffer[sysfs_max_data_size + 1] = "\0";
-/*
+static char sysfs_buffer[sysfs_max_data_size + 1] = "\0";
 static ssize_t used_buffer_size = 0;
 static char input_address[9];
 static char input_number[3];
 static char input_operation;
 static int index_read;
-static int index_write;
+static int index_write = 0;
 static uint32_t* register_ptr;
+static char register_value_string[register_size*2 + 1] = "\0";
 static uint32_t address_in_hex;
-*/
 
 #define RTC_UCOUNT  0x40024000
 #define RTC_CTRL    0x40024010
-
-//uint32_t* rtc_ucount;
-//uint32_t* rtc_ctrl;
-
-static ssize_t  sysfs_show(struct device *dev,
-    struct device_attribute *attr, char *buffer)
-{
-    printk(KERN_INFO "sysfile_read (/sys/kernel/%s/%s) called\n",
-        sysfs_dir, sysfs_file);
-    /* stop rtc */
-    //*rtc_ctrl = (1<<6);
-    return sprintf(buffer, "I LIKE CHOCOLATE CAKE\n");
-}
 
 static uint32_t hex2int(char *hex) {
     /*
@@ -72,46 +47,67 @@ static uint32_t hex2int(char *hex) {
     return val;
 }
 
+static ssize_t  sysfs_show(struct device *dev,
+    struct device_attribute *attr, char *buffer)
+{
+    printk(KERN_INFO "sysfile_read (/sys/kernel/%s/%s) called\n",
+        sysfs_dir, sysfs_file);
+    return sprintf(buffer, "%s", sysfs_buffer);
+}
+
+static void parse_input(const char* buffer)
+{
+    index_write = 0;
+    input_operation = buffer[0];
+    for(index_read=2;index_read<used_buffer_size;index_read++)
+    {
+        if(index_read<10)
+        {
+            input_address[index_write++] = buffer[index_read];
+        }
+        else if(index_read == 10)
+        {
+            input_address[8] = '\0';
+            index_write = 0;
+        }
+        else if(index_read > 10)
+        {
+            input_number[index_write++] = buffer[index_read];
+        }
+    }
+    input_number[index_write-1] = '\0';
+}
+
 static ssize_t sysfs_store(struct device* dev,
     struct device_attribute* attr, const char* buffer,
     size_t count)
 {
     used_buffer_size = count > sysfs_max_data_size ? sysfs_max_data_size : count;
-    char address[9];
-    char number[8] = "\0";
-    int index_read = 2;
-    int index_write = 0;
-    uint32_t* register_ptr;
-    uint32_t hex;
 
-    input_operation = buffer[0];
-    if(buffer[0] == 'r')
+    parse_input(buffer);
+
+    if(input_operation == 'r')
     {
-        for(index_read=2;index_read<used_buffer_size;index_read++)
-        {
-            if(index_read<10)
-            {
-                input_address[index_write++] = buffer[index_read];
-            }
-            else if(index_read == 10)
-            {
-                input_address[8] = '\0';
-                index_write = 0;
-            }
-            else if(index_read > 10)
-            {
-                input_number[index_write++] = buffer[index_read];
-            }
-        }
-        input_number[index_write-1] = '\0';
-        printk(KERN_INFO "Address: %s Number: %s) called\n", input_address, input_number);
+        printk(KERN_INFO "Performing read operation on address: %s\n", input_address);
+        printk(KERN_INFO "Address: %s Number: %s called\n", input_address, input_number);
+
+        address_in_hex = hex2int(input_address);
+        register_ptr = io_p2v(address_in_hex);
+        printk(KERN_INFO "*register_ptr: %x", *register_ptr);
+        sprintf(register_value_string, "%x", *register_ptr);
+        printk(KERN_INFO "register_value_string: %s", register_value_string);
+        printk(KERN_INFO "register_value_string size: %u", sizeof(register_value_string));
+
+        memcpy(sysfs_buffer, register_value_string, register_size);
+        sysfs_buffer[9] = '\0';
     }
-
-    hex = hex2int(input_address);
-    register_ptr = io_p2v(address_in_hex);
-
-    printk(KERN_INFO "(%s) : (%x)", address, *register_ptr);
-
+    else if(input_operation == 'w')
+    {
+    }
+    else
+    {
+        printk(KERN_WARNING "Invalid operation: %c\n", input_operation);
+    }
     return used_buffer_size;
 }
 
@@ -152,9 +148,6 @@ int __init sysfs_init(void)
         kobject_put(peek_obj);
         return -ENOMEM;
     }
-
-    //rtc_ucount = io_p2v(RTC_UCOUNT);
-    //rtc_ctrl = io_p2v(RTC_CTRL);
 
     printk(KERN_INFO
         "/sys/kernel/%s/%s created\n", sysfs_dir, sysfs_file);
