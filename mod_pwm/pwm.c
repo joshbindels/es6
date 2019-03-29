@@ -176,7 +176,7 @@ device_write(struct file* filp, const char* buff, size_t len, loff_t* off)
             {
                 return -EINVAL;
             }
-            *PWM1_PTR |= (adj_input_val << PWM_RELOADV);
+            *PWM2_PTR |= (adj_input_val << PWM_RELOADV);
             printk(KERN_INFO "Writing freq<%d Hz> to pwm2\n", pwm2_frequency);
             break;
         }
@@ -188,7 +188,7 @@ device_write(struct file* filp, const char* buff, size_t len, loff_t* off)
             {
                 return -EINVAL;
             }
-            *PWM1_PTR |= (adj_input_val << PWM_DUTY);
+            *PWM2_PTR |= (adj_input_val << PWM_DUTY);
             printk(KERN_INFO "Writing duty<%d%%> to pwm2\n", pwm2_duty);
             break;
         }
