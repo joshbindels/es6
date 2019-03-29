@@ -2,38 +2,31 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <mach/hardware.h>
 
-#define SUCCESS 0
-#define DEVICE_NAME "pwm"
+#include "pwm.h"
 
-static bool device_opened = false;
-static int how_often_opened = 0;
+static int map_duty(int* val)
+{
+    if((*val <= 0) | (*val > 100))
+    {
+        return -EINVAL;
+    }
+    return (*val * 255) / 100;
+}
 
-static int major_number = 0;
-static int minor_number = 0;
-
-/*
- * minor number : node
- * 0 : /dev/pwm_freq
- * 1 : /dev/pwm_duty
- * 2 : /dev/pwm_enabled
- */
-static int pwm_enabled = 0;
-static int pwm_frequency = 0;
-static int pwm_duty = 0;
-
-static int result = 0;
-static int input_val = 0;
+static int map_frequency(int* val)
+{
+    if((*val <= 0) | (*val > PWM_CLOCK_FREQ))
+    {
+        return -EINVAL;
+    }
+    return (PWM_CLOCK_FREQ / *val) / 256;
+}
 
 
 static int device_open(struct inode* inode, struct file* file)
 {
-    printk(KERN_INFO "device open() called");
-    printk(KERN_INFO "Major number: %u", MAJOR(inode->i_rdev));
-    printk(KERN_INFO "Minor number: %u", MINOR(inode->i_rdev));
-
-    //minor_number = MINOR(inode->i_rdev);
-    //file->private_data = &minor_number;
     if(device_opened)
     {
         return -EBUSY;
@@ -46,7 +39,6 @@ static int device_open(struct inode* inode, struct file* file)
 
 static int device_release(struct inode* inode, struct file* file)
 {
-    printk(KERN_INFO "device_released() called");
     device_opened = false;
     module_put(THIS_MODULE);
     file->private_data = NULL;
@@ -61,57 +53,61 @@ device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
     int msgLength = 0;
     int bytesRemaining = 0;
 
+    minor_number = iminor(filp->f_path.dentry->d_inode);
+
     if(*offset != 0)
     {
         return 0;
     }
 
-    switch(iminor(filp->f_path.dentry->d_inode))
+    switch(minor_number)
     {
-        case 0:
+        case MIN_PWM1_FREQ:
         {
-            printk(KERN_INFO "device read called with minor number 0");
-            msgLength = snprintf(
-                msg, MaxSize, "%d", pwm_frequency
-            );
-
+            msgLength = snprintf(msg, MaxSize, "Frequency: %d\n", pwm1_frequency);
             bytesRemaining = copy_to_user(buffer, msg, msgLength);
-
             *offset += msgLength - bytesRemaining;
             break;
         }
-        case 1:
+        case MIN_PWM1_DUTY:
         {
-            printk(KERN_INFO "device read called with minor number 1");
-            msgLength = snprintf(
-                msg, MaxSize, "%d", pwm_duty
-            );
-
+            msgLength = snprintf(msg, MaxSize, "Duty: %d\n", pwm1_duty);
             bytesRemaining = copy_to_user(buffer, msg, msgLength);
-
             *offset += msgLength - bytesRemaining;
             break;
         }
-        case 2:
+        case MIN_PWM1_ENABLE:
         {
-            printk(KERN_INFO "device read called with minor number 2");
-            msgLength = snprintf(
-                msg, MaxSize, "%d", pwm_enabled
-            );
-
+            msgLength = snprintf(msg, MaxSize, "Enabled: %d\n", pwm1_enabled);
             bytesRemaining = copy_to_user(buffer, msg, msgLength);
-
+            *offset += msgLength - bytesRemaining;
+            break;
+        }
+        case MIN_PWM2_FREQ:
+        {
+            msgLength = snprintf(msg, MaxSize, "Frequency: %d\n", pwm2_frequency);
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+            *offset += msgLength - bytesRemaining;
+            break;
+        }
+        case MIN_PWM2_DUTY:
+        {
+            msgLength = snprintf(msg, MaxSize, "Duty: %d\n", pwm2_duty);
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+            *offset += msgLength - bytesRemaining;
+            break;
+        }
+        case MIN_PWM2_ENABLE:
+        {
+            msgLength = snprintf(msg, MaxSize, "Enabled: %d\n", pwm2_enabled);
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
             *offset += msgLength - bytesRemaining;
             break;
         }
         default:
         {
-            msgLength = snprintf(
-                msg, MaxSize, "Invalid read \n"
-            );
-
+            msgLength = snprintf(msg, MaxSize, "Invalid read \n");
             bytesRemaining = copy_to_user(buffer, msg, msgLength);
-
             *offset += msgLength - bytesRemaining;
             break;
         }
@@ -127,27 +123,80 @@ device_write(struct file* filp, const char* buff, size_t len, loff_t* off)
     result = sscanf(buff, "%d", &input_val);
     if (result != 1)
     {
-        printk(KERN_ALERT "Invalid write command");
+        printk(KERN_ALERT "Write takes 1 input value, received %d", result);
         return -EINVAL;
     }
-    switch(iminor(filp->f_path.dentry->d_inode))
+
+    if(input_val < 0 && input_val > 255)
     {
-        case 0:
+        printk(KERN_ALERT "Invalid value: %d, number should be between 0 and 255", input_val);
+        return -EINVAL;
+    }
+
+    minor_number = iminor(filp->f_path.dentry->d_inode);
+
+    switch(minor_number)
+    {
+        case MIN_PWM1_FREQ:
         {
-            printk(KERN_INFO "device write called with minor number 0");
-            pwm_frequency = input_val;
+            pwm1_frequency = input_val;
+            adj_input_val = map_frequency(&pwm1_frequency);
+            if(adj_input_val < 0)
+            {
+                return -EINVAL;
+            }
+            *PWM1_PTR |= (adj_input_val << PWM_RELOADV);
+            printk(KERN_INFO "Writing freq<%d Hz> to pwm1\n", pwm1_frequency);
             break;
         }
-        case 1:
+        case MIN_PWM1_DUTY:
         {
-            printk(KERN_INFO "device write called with minor number 1");
-            pwm_duty = input_val;
+            pwm1_duty = input_val;
+            adj_input_val = map_duty(&pwm1_duty);
+            if(adj_input_val < 0)
+            {
+                return -EINVAL;
+            }
+            *PWM1_PTR |= (adj_input_val << PWM_DUTY);
+            printk(KERN_INFO "Writing duty<%d%%> to pwm1\n", pwm1_duty);
             break;
         }
-        case 2:
+        case MIN_PWM1_ENABLE:
         {
-            printk(KERN_INFO "device write called with minor number 2");
-            pwm_enabled = input_val;
+            pwm1_enabled = input_val;
+            *PWM1_PTR = ((*PWM1_PTR) & ~(1<<PWM_EN)) ^ (pwm1_enabled<<PWM_EN);
+            printk(KERN_INFO "Enabling pwm1\n");
+            break;
+        }
+        case MIN_PWM2_FREQ:
+        {
+            pwm2_frequency = input_val;
+            adj_input_val = map_frequency(&pwm2_frequency);
+            if(adj_input_val < 0)
+            {
+                return -EINVAL;
+            }
+            *PWM1_PTR |= (adj_input_val << PWM_RELOADV);
+            printk(KERN_INFO "Writing freq<%d Hz> to pwm2\n", pwm2_frequency);
+            break;
+        }
+        case MIN_PWM2_DUTY:
+        {
+            pwm2_duty = input_val;
+            adj_input_val = map_duty(&pwm2_duty);
+            if(adj_input_val < 0)
+            {
+                return -EINVAL;
+            }
+            *PWM1_PTR |= (adj_input_val << PWM_DUTY);
+            printk(KERN_INFO "Writing duty<%d%%> to pwm2\n", pwm2_duty);
+            break;
+        }
+        case MIN_PWM2_ENABLE:
+        {
+            pwm2_enabled = input_val;
+            *PWM2_PTR = ((*PWM2_PTR) & ~(1<<PWM_EN)) ^ (pwm2_enabled<<PWM_EN);
+            printk(KERN_INFO "Enabling pwm2\n");
             break;
         }
         default:
@@ -187,6 +236,12 @@ int init_module(void)
     printk(KERN_INFO "'mknod /dev/%s c %d 0'.\n", DEVICE_NAME, major_number);
     printk(KERN_INFO "the device file.\n");
     printk(KERN_INFO "Remove the device file and module when done.\n");
+
+    PWM1_PTR = (uint32_t*)(io_p2v(PWM1_ADDR));
+    PWM2_PTR = (uint32_t*)(io_p2v(PWM2_ADDR));
+    *(uint32_t*)(io_p2v(PWM_CLOCK)) = PWM_CLOCK_VAL;
+    *(uint32_t*)(io_p2v(LCD_CONF)) = LCD_CONF_VAL;
+
     return SUCCESS;
 }
 
