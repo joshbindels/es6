@@ -22,6 +22,9 @@ static int pwm_enabled = 0;
 static int pwm_frequency = 0;
 static int pwm_duty = 0;
 
+static int result = 0;
+static int input_val = 0;
+
 
 static int device_open(struct inode* inode, struct file* file)
 {
@@ -54,7 +57,8 @@ static ssize_t
 device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
 {
     //printk(KERN_INFO "device_read() called on minor number: %u", *(unsigned int*)(filp->private_data));
-    printk(KERN_INFO "device_read() called on minor number: %u", iminor(filp->f_path.dentry->d_inode));
+    //printk(KERN_INFO "device_read() called on minor number: %u", iminor(filp->f_path.dentry->d_inode));
+    /*
     const int MaxSize = length < 50 ? length : 50;
     char msg[MaxSize];
     int msgLength = 0;
@@ -73,42 +77,73 @@ device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
 
     *offset += msgLength - bytesRemaining;
     return msgLength - bytesRemaining;
+    */
+    switch(iminor(filp->f_path.dentry->d_inode))
+    {
+        case 0:
+        {
+            printk(KERN_INFO "device read called with minor number 0");
+            printk(KERN_INFO "PWM_FREQ: %d", pwm_frequency);
+            break;
+        }
+        case 1:
+        {
+            printk(KERN_INFO "device read called with minor number 1");
+            printk(KERN_INFO "PWM_DUTY: %d", pwm_duty);
+            break;
+        }
+        case 2:
+        {
+            printk(KERN_INFO "device read called with minor number 2");
+            printk(KERN_INFO "PWM_ENABLED: %d", pwm_enabled);
+            break;
+        }
+        default:
+        {
+            printk(KERN_INFO "device read called with minor number 3");
+            break;
+        }
+    }
+    return length;
+
 }
 
 static ssize_t
 device_write(struct file* filp, const char* buff, size_t len, loff_t* off)
 {
-    /*
+    result = sscanf(buff, "%d", &input_val);
+    if (result != 1)
+    {
+        printk(KERN_ALERT "Invalid write command");
+        return -EINVAL;
+    }
     switch(iminor(filp->f_path.dentry->d_inode))
     {
         case 0:
         {
             printk(KERN_INFO "device write called with minor number 0");
+            pwm_frequency = input_val;
             break;
         }
         case 1:
         {
             printk(KERN_INFO "device write called with minor number 1");
+            pwm_duty = input_val;
             break;
         }
         case 2:
         {
             printk(KERN_INFO "device write called with minor number 2");
+            pwm_enabled = input_val;
             break;
         }
         default:
         {
             printk(KERN_INFO "device write called with minor number 3");
-            return -EINVAL;
             break;
         }
     }
-    */
-    printk(KERN_INFO "device_write() called on minor number: %u", *(unsigned int*)(filp->private_data));
-    printk(KERN_ALERT "Sorry, this operation isn't supported.\n");
-    return -EINVAL;
-    return SUCCESS;
-    //return len;
+    return len;
 }
 
 static struct file_operations fops = {
