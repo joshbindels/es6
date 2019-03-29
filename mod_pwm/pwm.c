@@ -56,9 +56,6 @@ static int device_release(struct inode* inode, struct file* file)
 static ssize_t
 device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
 {
-    //printk(KERN_INFO "device_read() called on minor number: %u", *(unsigned int*)(filp->private_data));
-    //printk(KERN_INFO "device_read() called on minor number: %u", iminor(filp->f_path.dentry->d_inode));
-    /*
     const int MaxSize = length < 50 ? length : 50;
     char msg[MaxSize];
     int msgLength = 0;
@@ -69,42 +66,58 @@ device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
         return 0;
     }
 
-    msgLength = snprintf( //TODO: look up snprintf
-        msg, MaxSize, "I have been opened %d times!\n", how_often_opened
-    );
-
-    bytesRemaining = copy_to_user(buffer, msg, msgLength);
-
-    *offset += msgLength - bytesRemaining;
-    return msgLength - bytesRemaining;
-    */
     switch(iminor(filp->f_path.dentry->d_inode))
     {
         case 0:
         {
             printk(KERN_INFO "device read called with minor number 0");
-            printk(KERN_INFO "PWM_FREQ: %d", pwm_frequency);
+            msgLength = snprintf(
+                msg, MaxSize, "%d", pwm_frequency
+            );
+
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+
+            *offset += msgLength - bytesRemaining;
             break;
         }
         case 1:
         {
             printk(KERN_INFO "device read called with minor number 1");
-            printk(KERN_INFO "PWM_DUTY: %d", pwm_duty);
+            msgLength = snprintf(
+                msg, MaxSize, "%d", pwm_duty
+            );
+
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+
+            *offset += msgLength - bytesRemaining;
             break;
         }
         case 2:
         {
             printk(KERN_INFO "device read called with minor number 2");
-            printk(KERN_INFO "PWM_ENABLED: %d", pwm_enabled);
+            msgLength = snprintf(
+                msg, MaxSize, "%d", pwm_enabled
+            );
+
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+
+            *offset += msgLength - bytesRemaining;
             break;
         }
         default:
         {
-            printk(KERN_INFO "device read called with minor number 3");
+            msgLength = snprintf(
+                msg, MaxSize, "Invalid read \n"
+            );
+
+            bytesRemaining = copy_to_user(buffer, msg, msgLength);
+
+            *offset += msgLength - bytesRemaining;
             break;
         }
     }
-    return length;
+
+    return msgLength - bytesRemaining;
 
 }
 
