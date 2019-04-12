@@ -6,6 +6,66 @@
 #include <linux/fs.h>
 //#include <mach/hardware.h>
 
+static struct PIN {
+    uint32_t pin;
+    uint32_t connector;
+    uint32_t direction;
+    uint32_t write_reg;
+    uint32_t clear_reg;
+    uint32_t read_reg;
+};
+
+static PIN pins[192];
+
+/*
+ * P0
+ */
+#define P0_DIR_SET      0x40028050
+#define P0_DIR_CLR      0x40028054
+#define P0_DIR_STATE    0x40028058
+#define P0_INP_STATE    0x40028040
+#define P0_OUTP_SET     0x40028044
+#define P0_OUTP_CLR     0x40028048
+#define P0_OUTP_STATE   0x4002804C
+
+/*
+ * P1
+ */
+#define P1_MUX_SET      0x40028130
+#define P1_MUX_CLR      0x40028134
+#define P1_MUX_STATE    0x40028138
+#define P1_DIR_SET      0x40028070
+#define P1_DIR_CLR      0x40028074
+#define P1_DIR_STATE    0x40028078
+#define P1_INP_STATE    0x40028060
+#define P1_OUTP_SET     0x40028064
+#define P1_OUTP_CLR     0x40028068
+#define P1_OUTP_STATE   0x4002806C
+
+#define P1_MUX_SET_VALUE 0x00FFFFFF
+
+/*
+ * P2
+ */
+#define P2_MUX_SET      0x40028028
+#define P2_DIR_SET      0x40028010
+#define P2_MUX_STATE    0x40028030
+#define P2_DIR_CLR      0x40028014
+#define P2_DIR_STATE    0x40028018
+#define P2_INP_STATE    0x4002801C
+#define P2_OUTP_SET     0x40028020
+#define P2_OUTP_CLR     0x40028024
+
+#define P2_MUX_SET_VALUE (1 << 3)
+
+/*
+ * P3
+ */
+#define P3_INP_STATE    0x40028000
+#define P3_OUTP_SET     0x40028004
+#define P3_OUTP_CLR     0x40028008
+#define P3_OUTP_STATE   0x4002800C
+
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("f_Vasilis_Josh_Elizabet");
 MODULE_DESCRIPTION("GPIO Driver");
@@ -53,6 +113,7 @@ sysfs_store(struct device* dev, struct device_attribute* attr, const char* buffe
         printk(KERN_WARNING "Expected 2 parameters got %d\n", result);
         return -EINVAL;
     }
+    //TODO: Set i/o directions
     printk(KERN_INFO "Connector<%d> pin<%d> value<%c>\n",
         connector, pin_number, pin_direction);
     sprintf(result_string,"Connector<%d> pin<%d> value<%c>\n",
@@ -95,8 +156,21 @@ static int device_release(struct inode* inode, struct file* file)
 static ssize_t
 device_read(struct file* filp, char* buffer, size_t length, loff_t* offset)
 {
+    /*
+    if(*offset != 0)
+    {
+        return 0;
+    }
+
+    int msgLength = 0;
+    msgLength = snprintf(buffer, sizeof(dev_res_string), dev_res_string);
+    int bytesRemaining = 0;
+    bytesRemaining = copy_to_user(buffer, dev_res_string, sizeof(dev_res_string));
+    */
+    sprintf(buffer, dev_res_string);
     copy_to_user(buffer, dev_res_string, sizeof(dev_res_string));
-    return length;
+    printk(KERN_INFO "%s", dev_res_string);
+    return 0;
 }
 
 static ssize_t
@@ -119,7 +193,7 @@ device_write(struct file* filp, const char* buff, size_t len, loff_t* off)
             break;
         case 'r':
             printk(KERN_INFO "Read Connector<%d> Pin<%d>\n", connector, pin_number);
-            sprintf(dev_res_string, "Read Connector<%d> Pin<%d>",
+            sprintf(dev_res_string, "Cat Connector<%d> Pin<%d>",
                 connector, pin_number);
             break;
         default:
@@ -168,6 +242,8 @@ int __init sysfs_init(void)
     }
     printk(KERN_INFO "Created char device");
     printk(KERN_INFO "Major number: %d", major_number);
+
+    //TODO: set mux states
 
     return result;
 }
