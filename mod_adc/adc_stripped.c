@@ -19,6 +19,9 @@
 #define ADC_VALUE           io_p2v(0x40048048)
 #define SIC2_ATR            io_p2v(0x40010010)
 
+//----
+#define SIC1_ER             io_p2v(0x4000c000)
+
 #define ADC_CTRL_MASK       (1<<2)
 
 #define READ_REG(a)         (*(volatile unsigned int *)(a))
@@ -58,8 +61,12 @@ static void adc_init(void)
     data |= ADC_CTRL_MASK;
     WRITE_REG(data, ADC_CTRL);
 
+    data = READ_REG(SIC1_ER);
+    data |= IRQ_LPC32XX_TS_IRQ;
+    WRITE_REG(data, SIC1_ER);
+
 	//IRQ init
-    if (request_irq(IRQ_LPC32XX_TS_IRQ, adc_interrupt, IRQF_DISABLED, "", NULL) != 0)
+    if (request_irq(IRQ_LPC32XX_TS_IRQ, adc_interrupt, IRQF_DISABLED, "adc_interrupt", NULL) != 0)
     {
         printk(KERN_ALERT "ADC IRQ request failed\n");
     }
@@ -69,7 +76,7 @@ static void adc_init(void)
     data |= _BIT(23);
     WRITE_REG(data, SIC2_ATR);
 
-    if (request_irq(IRQ_LPC32XX_GPI_01, gp_interrupt, IRQF_DISABLED, "", NULL) != 0)
+    if (request_irq(IRQ_LPC32XX_GPI_01, gp_interrupt, IRQF_DISABLED, "gpi_interrupt", NULL) != 0)
     {
         printk(KERN_ALERT "GP IRQ request failed\n");
     }
@@ -78,6 +85,7 @@ static void adc_init(void)
 
 static void adc_start(unsigned char channel)
 {
+    printk(KERN_INFO "adc_start");
 	unsigned long data;
 
 	if (channel >= ADC_NUMCHANNELS)
@@ -94,13 +102,20 @@ static void adc_start(unsigned char channel)
 
 	// start conversion
     // TODO
+    printk(KERN_INFO "Set ADC_CTRL");
     data = READ_REG(ADC_CTRL);
     data |= _BIT(1);
-    WRITE_REG(data, ADC_CTRL);
+    WRITE_REG(_BIT(1), ADC_CTRL);
+    printk(KERN_INFO "Set ADC_CTRL done");
+    //TODO: for debugging rm for prod
+    *((uint32_t*)io_p2v(0x40028044)) |= _BIT(0);
 }
 
 static irqreturn_t adc_interrupt(int irq, void * dev_id)
 {
+    printk(KERN_INFO "adc_interrupt");
+    //TODO: for debugging rm for prod
+    *((uint32_t*)io_p2v(0x40028048)) |= _BIT(0);
     adc_values[adc_channel] = READ_REG(ADC_VALUE);
     printk(KERN_WARNING "ADC(%d)=%d\n", adc_channel, adc_values[adc_channel]);
 
@@ -214,6 +229,9 @@ int adcdev_init(void)
 		printk(KERN_WARNING DEVICE_NAME ": unable to add device, error=%d\n", error);
 		return error;
 	}
+
+    //TODO: for debugging rm for prod
+    *((uint32_t*)io_p2v(0x40028050)) |= _BIT(0);
 
 	adc_init();
 
