@@ -4,9 +4,11 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/interrupt.h>
+#include <linux/mutex.h>
 #include <mach/hardware.h>
 #include <mach/platform.h>
 #include <mach/irqs.h>
+#include <asm/uaccess.h>
 
 #define DEVICE_NAME 		"adc"
 #define ADC_NUMCHANNELS		3
@@ -19,14 +21,17 @@
 #define ADC_VALUE           io_p2v(0x40048048)
 #define SIC2_ATR            io_p2v(0x40010010)
 
-//----
-#define SIC1_ER             io_p2v(0x4000c000)
+#define SIC1_ER             io_p2v(0x4000C000)
+#define ADC_VAL_MASK 0x3FF
 
 #define ADC_CTRL_MASK       (1<<2)
 
 #define READ_REG(a)         (*(volatile unsigned int *)(a))
 #define WRITE_REG(b,a)      (*(volatile unsigned int *)(a) = (b))
 
+DECLARE_WAIT_QUEUE_HEAD(adc_wait_event);
+static DEFINE_MUTEX(adc_mutex);
+static bool conversion_is_done = false;
 
 static unsigned char    adc_channel = 0;
 static int              adc_values[ADC_NUMCHANNELS] = {0, 0, 0};
@@ -61,6 +66,7 @@ static void adc_init(void)
     data |= ADC_CTRL_MASK;
     WRITE_REG(data, ADC_CTRL);
 
+    // enable touch screen interrupt
     data = READ_REG(SIC1_ER);
     data |= IRQ_LPC32XX_TS_IRQ;
     WRITE_REG(data, SIC1_ER);
@@ -82,10 +88,14 @@ static void adc_init(void)
     }
 }
 
-
 static void adc_start(unsigned char channel)
 {
-    printk(KERN_INFO "adc_start");
+    if(mutex_lock_interruptible(&adc_mutex))
+    {
+        printk(KERN_WARNING "ADC Conversion already in progress");
+        return;
+    }
+
 	unsigned long data;
 
 	if (channel >= ADC_NUMCHANNELS)
@@ -101,92 +111,86 @@ static void adc_start(unsigned char channel)
 	adc_channel = channel;
 
 	// start conversion
-    // TODO
-    printk(KERN_INFO "Set ADC_CTRL");
     data = READ_REG(ADC_CTRL);
     data |= _BIT(1);
-    WRITE_REG(_BIT(1), ADC_CTRL);
-    printk(KERN_INFO "Set ADC_CTRL done");
-    //TODO: for debugging rm for prod
-    *((uint32_t*)io_p2v(0x40028044)) |= _BIT(0);
+    WRITE_REG(data, ADC_CTRL);
+
+
 }
 
 static irqreturn_t adc_interrupt(int irq, void * dev_id)
 {
-    printk(KERN_INFO "adc_interrupt");
-    //TODO: for debugging rm for prod
-    *((uint32_t*)io_p2v(0x40028048)) |= _BIT(0);
-    adc_values[adc_channel] = READ_REG(ADC_VALUE);
+    adc_values[adc_channel] = READ_REG(ADC_VALUE) & ADC_VAL_MASK0x3FF;
     printk(KERN_WARNING "ADC(%d)=%d\n", adc_channel, adc_values[adc_channel]);
 
     // start the next channel:
     adc_channel++;
+    mutex_unlock(&adc_mutex);
     if (adc_channel < ADC_NUMCHANNELS)
     {
         adc_start(adc_channel);
     }
+
+    conversion_is_done = true;
+    wake_up_interruptible(&adc_wait_event);
     return (IRQ_HANDLED);
 }
 
 static irqreturn_t gp_interrupt(int irq, void * dev_id)
 {
-    printk(KERN_INFO "GP interrupt");
+    conversion_is_done = false;
     adc_start(0);
 
     return (IRQ_HANDLED);
 }
 
-
 static void adc_exit(void)
 {
-    free_irq (IRQ_LPC32XX_TS_IRQ, NULL);
-    free_irq (IRQ_LPC32XX_GPIO_01, NULL);
+    free_irq(IRQ_LPC32XX_TS_IRQ, NULL);
+    free_irq(IRQ_LPC32XX_GPIO_01, NULL);
 }
-
 
 static ssize_t device_read (struct file * file, char __user * buf, size_t length, loff_t * f_pos)
 {
 	int     channel = (int) file->private_data;
     int     bytes_read = 0;
+    int     bytes_written = 0;
+    char    outMsg[128];
 
-    printk (KERN_WARNING DEVICE_NAME ":device_read(%d)\n", channel);
+    printk(KERN_WARNING DEVICE_NAME ":device_read(%d)\n", channel);
 
-    if (channel < 0 || channel >= ADC_NUMCHANNELS)
+    if(channel < 0 || channel >= ADC_NUMCHANNELS)
     {
 		return -EFAULT;
     }
 
+    conversion_is_done = false;
     adc_start(channel);
+    wait_event_interruptible(adc_wait_event, conversion_is_done);
 
-    // TODO: wait for end-of-conversion,
-    // read adc and copy it into 'buf'
+    bytes_written = sprintf(outMsg, "%d", adc_values[channel]);
+    bytes_read = copy_to_user(buf, outMsg, bytes_written + 1);
 
-    return (bytes_read);
+    return bytes_read;
 }
-
-
-
 
 static int device_open (struct inode * inode, struct file * file)
 {
     // get channel from 'inode'
-    int channel = 0;
-
+    int channel = MINOR(inode->i_rdev);;
+    file->private_data = (void*)channel;
 
     try_module_get(THIS_MODULE);
     return 0;
 }
 
-
 static int device_release (struct inode * inode, struct file * file)
 {
     printk (KERN_WARNING DEVICE_NAME ": device_release()\n");
 
-
     module_put(THIS_MODULE);
 	return 0;
 }
-
 
 static struct file_operations fops =
 {
@@ -196,13 +200,11 @@ static struct file_operations fops =
     .release = device_release
 };
 
-
 static struct chardev
 {
     dev_t       dev;
     struct cdev cdev;
 } adcdev;
-
 
 int adcdev_init(void)
 {
@@ -230,10 +232,9 @@ int adcdev_init(void)
 		return error;
 	}
 
-    //TODO: for debugging rm for prod
-    *((uint32_t*)io_p2v(0x40028050)) |= _BIT(0);
 
 	adc_init();
+
 
 	return 0;
 }
